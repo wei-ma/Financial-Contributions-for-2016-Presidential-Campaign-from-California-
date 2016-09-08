@@ -1,0 +1,38 @@
+ref:
+1. Federal Election Commission: 'http://fec.gov/disclosurep/pnational.do'
+
+2. Metadata description: 'http://www.fec.gov/finance/disclosure/metadata/metadata_presidential_committee_report_summary.shtml'
+
+3. usefull R packages: 'https://support.rstudio.com/hc/en-us/articles/201057987-Quick-list-of-useful-R-packages'
+
+4. leaflet: 'http://rstudio.github.io/leaflet/'
+
+5. leaflet: 'http://rstudio.github.io/leaflet/map_widget.html'
+
+6. maps package:'https://cran.r-project.org/web/packages/maps/maps.pdf'
+
+7. maps UBC ppt:'http://www.zoology.ubc.ca/~kgilbert/mysite/Miscellaneous_files/R_MakingMaps.pdf'
+
+8. data source: ’http://fec.gov/finance/disclosure/norcansea.shtml'
+
+9. candidate info: ‘http://www.fec.gov/disclosurep/PCandList.do’
+ 
+10. cadidate summary: 'http://www.fec.gov/data/CandidateSummary.do'
+
+11. california info: 'https://en.wikipedia.org/wiki/List_of_cities_and_towns_in_California'
+
+12. california devision plan: ‘http://www.usatoday.com/story/news/nation-now/2014/02/21/california-six-states-plan-tim-draper/5673283/'
+
+13. color palette:’https://cran.r-project.org/web/packages/RColorBrewer/RColorBrewer.pdf'
+
+14. color hex code finder:’http://www.colorpicker.com'
+
+15. Udacity example: Climatology of Atlantic Hurricanes/diamondsExample_2016-05
+
+16. figure size:’https://rstudio.github.io/dygraphs/r-markdown.html'
+
+17. theme parameters: ‘http://docs.ggplot2.org/0.9.2.1/theme.html’
+
+18. test normality: 'https://statsthewayilikeit.files.wordpress.com/2014/07/tests-for-normality.pdf'
+
+20. arrange ggplots: 'https://github.com/baptiste/gridextra/wiki/arranging-ggplot'

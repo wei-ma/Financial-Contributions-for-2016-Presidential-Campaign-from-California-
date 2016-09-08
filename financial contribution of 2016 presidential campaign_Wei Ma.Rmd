@@ -1,0 +1,1362 @@
+# Financial Contribution to Presidential Campaign of California, 2016
+### WEI MA
+### August 30, 2016
+
+========================================================
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using
+# in the analysis in this code chunk.
+library(maps)
+library(leaflet)
+library(dplyr)
+library(tidyr)
+library(mapdata)
+library(ggplot2)
+library(RColorBrewer)
+library(gridExtra)
+library(GGally)
+```
+
+```{r echo=FALSE, warning = FALSE, Load_the_Data}
+#setwd('~/Documents/udaprojects/p4/P4_financial contributions to presidential campaigns /v3.0')
+# load financial contribution in 2016 of california
+fc <- read.csv(file = 'fc_CA_v1.csv', header = TRUE, row.names = NULL)
+fc_v1 <- fc %>% select(-tran_id, -memo_text, -form_tp,-memo_cd,
+                       -receipt_desc, -cmte_id, -contbr_st, -file_num,
+                       -tran_id)
+
+## only consider P2016
+fc_v1 <- subset(fc_v1, election_tp!="P2020") %>% select(-election_tp)
+
+# add candidate party to the data set
+can_list <- read.csv(file='candidate-list.csv', 
+                     header=TRUE, row.names = NULL)
+can_list <- can_list %>% select(cand_id, cand_pty_aff)
+fc_v2 <- left_join(fc_v1, can_list, by='cand_id')
+
+# add candidate gender to the data set
+cands <- fc_v2 %>% select(cand_id, cand_nm) %>% 
+  group_by(cand_id, cand_nm) %>% 
+  summarise(n=n()) %>% 
+  select(cand_id,cand_nm)
+
+cands$cand_gender <- c(rep('male', 24))
+females <- c("P00003392","P20003984","P60007242")
+cands$cand_gender <- ifelse(cands$cand_id %in% females,
+                            'female',cands$cand_gender)
+fc_v3 <- left_join(fc_v2, cands %>% 
+                     select(cand_id, cand_gender), 
+                   by='cand_id')
+
+names(fc_v3)[13]<-'contb_receipt_amt.individual'
+
+# add contributor's geographical information to the data set
+# load city names in CA
+data(us.cities)
+#summary(us.cities)
+ca.cities <- us.cities[us.cities$country.etc == "CA", ]
+ca.cities <- ca.cities %>% separate(name, c("zip_city"), sep=" CA")
+ca.cities$zip_city <- toupper(ca.cities$zip_city)
+ca.cities$contbr_city <- ca.cities$zip_city
+ca.cities <- ca.cities %>% select(-zip_city,-country.etc,-capital)
+names(ca.cities) <- c("city.pop","city.lat","city.long","contbr_city")
+fc_v4 <- left_join(fc_v3, ca.cities, by="contbr_city")
+
+# only consider contributions more than 0, excludes refunds
+fc_v5 <- subset(fc_v4, contb_receipt_amt.individual > 0)
+
+# add the total contribution a candidate obtained, as total.amt
+# add the total transaction number a candicate obtained, as n 
+total.amt <- fc_v5 %>% 
+  select(cand_nm, contb_receipt_amt.individual) %>%
+  group_by(cand_nm) %>%
+  summarise(total.amt=sum(contb_receipt_amt.individual),cand.n=n()) %>%
+  arrange(desc(total.amt))
+
+fc_v6 <- left_join(fc_v5, total.amt, by="cand_nm")
+
+# add contributor's region, as contbr_region
+all.county <- unique(subset(fc_v6, !is.na(county))$county)
+jefferson.county <- c("BUTTE","COLUSA","DELNORTE","GLENN",
+                      "HUMBOLDT", "LAKE", "LASSEN",
+                      "MENDOCINO", "MODOC","PLUMAS",
+                      "SISKIYOU","SHASTA","TEHAMA","TRINITY") 
+##14 counties
+
+northca.county <- c("AMADOR","EL DORADO","MARIN",
+                    "NAPA","NEVADA","PLACER",
+                    "SACRAMENTO","SIERRA","SOLANO",
+                    "SONOMA","SUTTER","YOLO","YUBA")
+## 13 counties
+
+centralca.county <- c("ALPINE","CALAVERAS","FRESNO","INYO",
+                      "KERN","KINGS","MADERA","MARIPOSA",
+                      "MERCED","MONO","SAN JOAQUIN",
+                      "STANISLAUS","TULARE","TUOLUMNE") 
+## 14 counties
+
+siliconva.county <- c("ALAMEDA","CONTRA COSTA","SAN BENITO",
+                      "SAN FRANCISCO","SAN MATEO","SANTA CLARA",
+                      "SANTA CRUZ","MONTEREY") 
+## 8 counties
+
+westca.county <- c("SANTA BARBARA","SAN LUIS OBISPO",
+                   "LOS ANGELES","VENTURA") 
+## 4 counties
+
+southca.county <- c("IMPERIAL","ORANGE","RIVERSIDE",
+                    "SAN BERNARDINO","SAN DIEGO") 
+## 5 counties
+
+region1 <- data.frame(county=jefferson.county,
+                      contbr_region="JEFFERSON")
+region2 <- data.frame(county=northca.county,contbr_region="NORTH CA")
+region3 <- data.frame(county=centralca.county,
+                      contbr_region="CENTRAL CA")
+region4 <- data.frame(county=siliconva.county,
+                      contbr_region="SILICON VALLEY")
+region5 <- data.frame(county=westca.county, contbr_region="WEST CA")
+region6 <- data.frame(county=southca.county,contbr_region="SOUTH CA")
+county.region <- bind_rows(region1, region2, region3, region4,
+                           region5,region6)
+
+# add regional populaiton as region.pop
+regions <- c("JEFFERSON","NORTH CA","CENTRAL CA",
+             "SILICON VALLEY","WEST CA","SOUTH CA")
+region.pops <- c(947526,3810543,4196882,6787417,11504823,10794239)
+region.pop <- data.frame(contbr_region=regions,region.pop=region.pops)
+county.region <- left_join(county.region, region.pop,
+                           by="contbr_region")
+
+fc_v7 <- left_join(fc_v6, county.region, by="county")
+
+# add contbr_region.n, which is the number of people voted in that region
+fc_v7 <- fc_v7 %>% group_by(contbr_region) %>%
+  mutate(contbr_region.n=n())
+# add contbr_county.n, which is the number of people voted in that region
+fc_v7 <- fc_v7 %>% ungroup() %>% group_by(county) %>%
+  mutate(contbr_county.n=n())
+fc_v7 <- fc_v7 %>% ungroup()
+```
+# Introduction
+California is based on the west coast of the United States. It is the most populous state as well as the third extensive by area. In additon to the properity of film industry in Hollywood, a large amount of high-tech companies sprouting up all across the silicon valley make california one of the largest economic entity in the world. There 58 counties and 482 municipalities in california. It is normally conceived that the political atmosphere is liberal rather than conservative. By scrutinizing the financial contribution to presidential campaign with california, we can have a better understanding of the politicla geography of california. Does the people contribute more to democratical candidates than republican candidates? Which condidates have the most financial support from california? What are the propertities of candidates make residents in california tend to support him or her? These questions would be investigated in this project. 
+
+```{r echo=FALSE, warning=FALSE}
+mapCounty <- map('county', 'ca',fill = TRUE, plot = FALSE)
+leaflet(data = mapCounty) %>% addTiles() %>% 
+  addPolygons(fillColor = topo.colors(10, alpha = NULL), 
+              stroke = FALSE)
+```
+
+# Univariate Plots Section
+
+have a look at the data frame
+```{r echo = FALSE, warning=FALSE}
+str(fc_v7)
+dim(fc_v7)
+
+fc_v7$county <- as.factor(fc_v7$county)
+fc_v7$contbr_city <- as.factor(fc_v7$contbr_city)
+```
+
+There are 542729 observations and 24 variables. 
+
+```{r Univariate_Plots}
+univ_cont <- function(data, feature,
+                      fill_color='orange',
+                      binwidth=10,
+                      xlim_quant_perct = 0.95,
+                      xlim_quant=TRUE,
+                      trans_x_log=FALSE, 
+                      trans_y_log=FALSE
+                      ) {
+  p1 <- ggplot(data = data, aes_string(x=feature)) +
+      geom_histogram(fill=fill_color, binwidth = binwidth)
+  if (xlim_quant) {
+    xlim_feature <- as.numeric(as.matrix(data[,feature]))
+    p1 <- p1 +
+      xlim(0, quantile(xlim_feature, xlim_quant_perct))
+  }
+  if (trans_x_log) {
+   p1 <- p1 + scale_x_log10() 
+  }
+  if (trans_y_log) {
+    p1 <- p1 + scale_y_log10()
+  }
+  p1
+}
+
+# histograms of contribution amount, exclude refund
+univ_cont(fc_v7, "contb_receipt_amt.individual")
+```
+
+It is obvious that the single transaction amount is not normally distributed from both the histogram on the left and the qqplot on the right. Also, I would like to conduct shapiro test by obtaining a sample size of 5000 from the population. 
+
+```{r shapiro test1}
+uplim <- quantile(fc_v7$contb_receipt_amt.individual, .95)
+subset.fc_v7 <- subset(fc_v7, contb_receipt_amt.individual<= uplim)
+set.seed(1000)
+sample0 <- sample(subset.fc_v7$contb_receipt_amt.individual, 5000)
+shapiro.test(sample0)
+```
+In shapiro test, the null hypothesis is that is sample is from a normally distributed population, and the alternative hypothesis is that the population is not normally distributed. The p value of shapiro test is less than 2.2e-16, and less than 0.05, in which case we reject the null. The population is not normally distributed. Then I would like to conduct a log10 scale transmission in single transaction amount axis.
+
+```{r }
+# plotting a log scale, it is of contribution amount
+univ_cont(fc_v7, "contb_receipt_amt.individual",
+          fill_color = 'blue',
+          binwidth = .2,
+          trans_x_log = TRUE) + 
+  coord_cartesian(xlim=c(.5, 10800))
+```
+
+After transmission, the plot looks like normally distributed. Now conduct shapiro test on log scale of the single transaction contribution amount. 
+
+```{r shapiro test2}
+set.seed(2000)
+sample1 <- sample(log(fc_v7$contb_receipt_amt.individual), 5000)
+shapiro.test(sample1) 
+```
+As p-value is still less than 2.2e-16, the null hypothesis that the population is normal is rejected, which means the log scale of the population is still not normally distributed. 
+
+```{r}
+summary(fc_v7$contb_receipt_amt.individual)
+```
+
+The single transaction amount is highly skewed, it is better to transform the amount to log10 scale to make it to a near normal distribution. Most single transaction amount falls between 15 to 100. 
+
+Now I would have a look at the single transaction amount distribution for different parties by faceting the distribution by candidates' party.
+
+```{r}
+univ_cont(fc_v7, "contb_receipt_amt.individual",
+          fill_color = 'skyblue',
+          binwidth = .15,
+          trans_x_log = TRUE) +
+  facet_wrap(~cand_pty_aff, scales = 'free')
+```
+
+It looks like suppoerters of republican party would like to contribute more in an individual transaction, where as democratic party's supporters contribute less in an individual transaction. To have a better look at distribution of single transaction amount varied between parties, a frequency polygon is plotted below. The y axis is density, which is the percentage of the supportors within a party's supportors gave the specific single amount.
+
+```{r echo=FALSE, warning=FALSE}
+# freqpolygon of single contribution amount of each party
+ggplot(aes(x=contb_receipt_amt.individual, y = ..density..), 
+       data = fc_v7) +
+  geom_freqpoly(aes(color=cand_pty_aff), binwidth=100) +
+  xlim(0, quantile(fc_v5$contb_receipt_amt.individual, 0.95))
+```
+
+```{r}
+by(fc_v7$contb_receipt_amt.individual, fc_v7$cand_pty_aff, summary)
+```
+
+As the single trnasaction amount is highly skewed, median is better indicator for the single amount rather than the mean amount. For democratic party, most single transaction amounts fall within 15 dollars to 54 dollars, and the median is 27 dolloars. For republican party, most single transaction amounts fall within 25 dollars to 100 dollars and median is 50 dollars, supportors of republican party tend to contributes more in single transaction than supportors for democratic party. Supporters for green party tend to contribute 35 dollars to 250 dollars in a single transaction mostly and supporters for libertarian tend to contribute 100 dollars to 500 dollars in a single transaction. In conclusion, supportors for libertarian party contributed the largest amount in a single transaction, follwed by green party, and then republican party. Supporters of democratic gave the smallest amount in a single transaction. Also, we can see the largest single transacton amount 10800 dollars goes to the republican party.
+
+Now I wonder which party received the largest total number of transactions. Because the values of the transaction number span over several orders of magnitude, log scale is used to make the smaller values visible. When plotting the transaction number, I put original transaction number bar graph on the left and the transformed log scale count on the right.  
+
+```{r echo=FALSE,warning=FALSE, results='hide'}
+univ_disc <- function(data, feature,
+                      fill_feature=NA,
+                      trans_y_log=FALSE
+                      ) {
+  if (!is.na(fill_feature)) {
+    p1 <- ggplot(data = data, aes_string(x=feature)) +
+      geom_bar(aes_string(fill=fill_feature))
+  } else {
+    p1 <- ggplot(data = data, aes_string(x=feature)) +
+      geom_bar()
+  }
+  if (trans_y_log) {
+    p1 <- p1 + scale_y_log10()
+  }
+  p1
+}
+
+fc_v7$cand_pty_aff <- ordered(fc_v7$cand_pty_aff,
+                              levels=c("Libertarian Party",
+                                       "Green Party",
+                                       "Republican Party",
+                                       "Democratic Party"))
+p1 <- univ_disc(fc_v7, "cand_pty_aff", fill_feature = "..count..") +
+  theme(axis.text.x=element_text(angle = 30,hjust = 1),
+        legend.position="none",
+        title=element_text(size=8)) +
+  ggtitle("Transcation number")
+
+p2 <- univ_disc(fc_v7, "cand_pty_aff", fill_feature = "..count..",
+                trans_y_log = TRUE) +
+  theme(legend.position="right",
+        axis.text.x=element_text(angle = 30, hjust = 1),
+        title=element_text(size=8)) +
+  ggtitle("Transaction number on a log scale")
+
+grid.arrange(p1, p2, ncol=2, widths=c(1,1.5))
+```
+
+Democratic party has the largest transaction number, and republican party follows the democratic party, has the second largest transaction number. It is obcious that green party and libertarian party have way less transaction number compared to republican and democratic party. 
+
+According to the analysis for single transaction amount distribution and bar graph above, we already know a basic fact about the two main parties democratic party and republican party. Single transaction amount for republican party is relatively larger than for democratic party, whereas the total number of transactions for democratic party is way more larger than the total number of transactions for republican party. 
+
+At this point, I would like to look into two main parties about the total number of transactions for individual candidates. I wonder which individual has the most transaction number in democratic and republican party? Firstly, bar graph for democratic party is drawn. 
+
+```{r echo=FALSE, warning=FALSE}
+# have a look at the democratic party
+data <- subset(fc_v7, cand_pty_aff =="Democratic Party") 
+
+p1 <- univ_disc(data, "cand_nm", fill_feature = "cand_gender") +
+  theme(axis.text.x=element_text(angle = 30,hjust = 1),
+        legend.position="None",
+        title=element_text(size=8)) +
+  ggtitle("Transcation number")
+p2 <- univ_disc(data, "cand_nm", fill_feature = "cand_gender",
+                trans_y_log = TRUE) +
+  theme(legend.position="None",
+        axis.text.x=element_text(angle = 30, hjust = 1),
+        title=element_text(size=8)) +
+  ggtitle("Transaction number on a log scale")
+
+grid.arrange(p1, p2, ncol=2)
+```
+
+Secondly, bar graphs of transaction number of republican party on both raw scale and log scale are drawn. 
+
+```{r bar graph for republican party}
+# have a look at the the republican party
+data <- subset(fc_v7, cand_pty_aff=="Republican Party")
+
+p1 <- univ_disc(data, "cand_nm", fill_feature = "cand_gender") +
+  theme(axis.text.x=element_text(angle = 45,hjust = 1),
+        legend.position="None",
+        title=element_text(size=8)) +
+  ggtitle("Transcation number")
+p2 <- univ_disc(data, "cand_nm", fill_feature = "cand_gender",
+                trans_y_log = TRUE) +
+  theme(legend.position="None",
+        axis.text.x=element_text(angle = 45, hjust = 1),
+        title=element_text(size=8)) +
+  ggtitle("Transaction number on a log scale")
+
+grid.arrange(p1, p2, ncol=2)
+```
+
+In democratic party, Sanders, Bernard has the most transaction number, follwed by Hillary Clinton, whereas in republican party, most people contributed to Ted Cruz, second largest transaction number goes to Ben Carson, and the third largest transaction number goes to Marco Rubio.
+
+```{r}
+table(fc_v7$cand_nm)
+```
+
+Now have closer look at democratic party and republican party. Focus on 7 main presidential candidates: "Clinton, Hillary Rodham","Sanders, Bernard","Bush, Jeb","Carson, Benjamin S.","Trump, Donald J.","Rubio, Marco","Cruz, Rafael Edward 'Ted'". 
+
+```{r pie chart for main cands}
+can_list2 <- fc_v7 %>% select(cand_nm, cand_pty_aff,
+                              contb_receipt_amt.individual) %>% 
+  group_by(cand_pty_aff, cand_nm) %>% 
+  summarise(cands.transaction.n=n()) %>% 
+  group_by(cand_pty_aff) %>% 
+  mutate(cands_in_pty=n(), pty.transaction.n=sum(cands.transaction.n))
+
+main_candidates <- c("Clinton, Hillary Rodham","Sanders, Bernard",
+                     "Bush, Jeb","Carson, Benjamin S.",
+                     "Trump, Donald J.","Rubio, Marco",
+                     "Cruz, Rafael Edward 'Ted'")
+can_list2.main <- can_list2 %>% filter(cand_nm%in%main_candidates)
+
+pie(can_list2.main$cands.transaction.n, 
+    labels=can_list2.main$cand_nm, 
+    main="main candidate's transaction number")
+```
+
+Although democratic party has less candidates than republican party, the transaction number for democratic party is larger than the transaction number for the republican party. 
+
+Also, I would like to have a look at the transaction number from different regions. 
+
+```{r results='hide'}
+univ_disc2 <- function(data, feature, feature2, 
+                       fill_feature=NA){
+  if (!is.na(fill_feature)) {
+    p1 <- ggplot(data = data, aes_string(x=feature, y=feature2)) +
+      geom_bar(stat='identity', aes_string(fill=fill_feature))
+  } else {
+    p1 <- ggplot(data = data, aes_string(x=feature, y=feature2)) +
+      geom_bar(stat='identity')
+  }
+  p1 + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+data <- unique(fc_v7 %>% subset(!is.na(contbr_region)) %>% 
+                       select(contbr_region, contbr_region.n)) %>% 
+  arrange(contbr_region.n) 
+
+data$contbr_region
+data$contbr_region <- ordered(data$contbr_region,
+                              levels=c("JEFFERSON",
+                                       "CENTRAL CA",
+                                       "NORTH CA", "SOUTH CA",
+                                       "WEST CA", "SILICON VALLEY"))
+univ_disc2(data, "contbr_region", "contbr_region.n",
+           fill_feature = "contbr_region.n")
+```
+
+```{r}
+unique(fc_v7 %>% select(contbr_region, contbr_region.n))
+```
+
+In the data set, most transactions comes from silicon valley, the second leargest transaction number comes from west california, the third largest transaction number comes from south califronia, followed by north califonia, jefferson, central california. 
+
+# Univariate Analysis
+### What is the structure of your dataset?
+```{r echo=FALSE, warning=FALSE, results='hide'}
+levels(fc_v7$cand_nm)
+unique(fc_v7 %>% filter(cand_gender=="female") %>% select(cand_nm))
+unique(fc_v7$cand_pty_aff)
+unique((fc_v7 %>% filter(cand_pty_aff=="Democratic Party"))$cand_nm)
+unique((fc_v7 %>% filter(cand_pty_aff=="Republican Party"))$cand_nm)
+unique((fc_v7 %>% filter(cand_pty_aff=="Green Party"))$cand_nm)
+unique((fc_v7 %>% filter(cand_pty_aff=="Libertarian Party"))$cand_nm)
+length(unique(fc_v7$contbr_occupation))
+
+# number of contributors 
+dim(unique(fc_v7 %>% select(contbr_zip, contbr_nm)))
+length(unique(fc_v7$contbr_city))
+```
+There are 542729 transactions of contribution. The single largest transaction is 10800, the single smallest transaction is 0.01. the median single transaction amount is 30.00, and the mean amount transaction is 143.50. Because the simgle amount of transaction is so skewed, the median value is a more important parameters indicating the most common amount of single transaction. 
+
+In this data set, there are 24 candidates. Among thess candidates, there are only three of them are females. The only three female candidates are "Clinton, Hillary Rodham", "Stein, Jill" and "Fiorina, Carly". All presidential candidates come from 4 parties: Democratic Party, Green Party, Republican Party and Libertarian Party. 
+
+5 candidates from Democratic Party: "Sanders, Bernard", "Clinton, Hillary Rodham", "Webb, James Henry Jr.", " O'Malley, Martin Joseph" and "Lessig, Lawrence".
+
+17 candidates from Republican Party: "Cruz, Rafael Edward 'Ted'","Walker, Scott","Bush, Jeb", "Rubio, Marco", "Christie, Christopher J.", "Paul, Rand", "Kasich, John R.","Fiorina, Carly", "Santorum, Richard J.", "Jindal, Bobby","Huckabee, Mike", "Trump, Donald J.","Pataki, George E.","Carson, Benjamin S.","Graham, Lindsey O.", "Perry, James R. (Rick)", "Gilmore, James S IIII".
+
+1 candidate from Green Party: Stein, Jill.
+
+1 candidate from Libertarian Party: Johnson, Gary.
+
+These cotributions were made by 104411 contributor. These contributors spread across 58 counties and 1458 cities. They come from 15687 occupations. 
+
+Univariate Analysis Observations:
+* Most single contibution amount falls between 30 dollars to 100 dollars.
+* Sanders, Bernard has the highest contibution number
+* Hillary Clinton has the second highest contribution number
+* Ted Cruz has the third highest contribution number
+* Republican Party has the lower contribution number, whereas each transaction        amount is higher than democratic party.
+* Democratic party has the higher contribution number, whereas each transaction       amount is relatively less than contributions for republican party. 
+
+### What is/are the main feature(s) of interest in your dataset?
+
+To predict the behavior of a specific contributor, the main feature in the data set would be contributor's city or county, the contributor's occupation. Contributors with some properties might be into a presidential candidats with specific properties like candidates' gender and candidate's party.  
+
+### What other features in the dataset do you think will help support your investigation into your feature(s) of interest?
+
+Contributor's employer might also have an impact on the amount and times of donation. One contributor might have donated several times which makes the total donation amount of a specific contributor relativly higher even though the single transaction amount is small. 
+
+### Did you create any new variables from existing variables in the dataset?
+
+Firstly, I add the 2 variables form the existing dataset: 
+* One is the total contribution a candidate obtained, which is total.amt. 
+* Another one is the total transaction number a candicate obtained, which is cand.n.
+
+Secondly, it is better to divide california state into 6 regions according to the SIX CALIFORNIA PLAN, I would like to add the region variable to each contributor according to their address like county and city. These 6 region is: Jefferson, North California, Central California, Silcon Valley, West California and South California.
+
+### Of the features you investigated, were there any unusual distributions? Did you perform any operations on the data to tidy, adjust, or change the form of the data? If so, why did you do this?
+
+Within the features I investigate, the amount of individual transaction is highly right skewed, I transformed the amount by adding a layer of log10, which made the distribution of single transaction amount to normal distribution. Most single amount falls between 15 dollars and 100 dollars. 
+
+# Bivariate Plots Section
+How does the single transaction amount differ from varies regions? I explore the singl transaction amount through boxplot. 
+```{r}
+biv_box <- function(data, feature, feature2,
+                    scale_y_log10=TRUE){
+  p1 <- ggplot(aes_string(x=feature, y=feature2), data=data)+
+    geom_boxplot()
+  if (scale_y_log10){
+    p1 <- p1 + scale_y_log10()
+  }
+  p1
+}
+```
+
+```{r Bivariate_Plots}
+biv_box(fc_v7, "contbr_region", "contb_receipt_amt.individual")
+```
+
+It looks like in overall people from different region gives the same amount in single donation, but we can use coord_cartesian to have closer look.
+
+```{r}
+biv_box(fc_v7, "contbr_region", "contb_receipt_amt.individual") +
+  coord_cartesian(ylim = c(1, 1000)) 
+```
+
+```{r results='hide'}
+by(fc_v7$contb_receipt_amt.individual, fc_v7$contbr_region, summary)
+```
+
+According to the bar graph above, people from central california and silicon valley gave slightly higher amount in single transaction. The resides region has slight impact on the amount of single donation. 
+
+Now move our focus back to the single transaction amount distribution in different parties. Boxplot based on different party is plotted below. 
+
+```{r echo=FALSE, warning=FALSE}
+biv_box(fc_v7, "cand_pty_aff", "contb_receipt_amt.individual") +
+  coord_cartesian(ylim = c(.5, 1000)) 
+```
+
+This boxplot validates the fact that the single transaction amount for different parties ranked from the highest to the lowest is: libertarian party > green party > republican party > democratic party, which happens to be the reverse order of the total number of transactions for different parties(obtained in univariate section).
+
+Also, in the univariate section, a bar plot is plotted to show the transaction number from different regions. However, it is more illustrative to incorporate the regional population when it comes to interpreting regional participation of financial contribution for presidential campaign. Then have a look at the participation of financial contribution in different regions by plotting a bar graph below, with region as x axis, population on the y-axis and coloring bars by participation ratio.
+
+```{r results='hide'}
+regional_particip <- unique(fc_v7 %>% 
+                              select(contbr_region, contbr_region.n,
+                                     region.pop)) %>%
+  mutate(region.particip_ratio=contbr_region.n/region.pop*100) %>%
+  filter(!is.na(contbr_region)) %>% 
+  ungroup() %>% arrange(region.particip_ratio)
+
+regional_particip$contbr_region <-
+  ordered(regional_particip$contbr_region,
+          levels=c("CENTRAL CA", "SOUTH CA", "WEST CA", "NORTH CA", 
+                   "JEFFERSON", "SILICON VALLEY"))
+
+regional_particip$contbr_region
+
+univ_disc2(regional_particip, "contbr_region", "region.pop",
+           fill_feature = "region.particip_ratio")
+```
+
+Silicon valley has the biggest participation ratio, follwed by jefferson and north california, whereas the participation ratio in central california is the lowest. The regional financial contrbution participation rate does not have a monotonic relationship between the population of the region. 
+
+Does the city population and the amount of individual transaction from people reside in that city has a relationship?
+
+```{r}
+biv_point <- function(data, feature, feature2,
+                      alpha=1/20,
+                      size=1/3,
+                      scale_x_log10=TRUE,
+                      scale_y_log10=TRUE){
+  p1 <- ggplot(data = data, 
+               aes_string(x=feature, y=feature2))+
+    geom_point(alpha=alpha, position=position_jitter(h=0),
+               size=size)
+  if (scale_x_log10){
+    p1 <- p1 + scale_x_log10()
+  }
+  if (scale_y_log10){
+    p1 <- p1 + scale_y_log10() 
+  }
+  p1
+}
+```
+
+```{r echo=FALSE, warning=FALSE}
+with(fc_v7, cor.test(city.pop, contb_receipt_amt.individual))
+
+biv_point(subset(fc_v7, !is.na(city.pop)),
+          "city.pop", "contb_receipt_amt.individual")
+```
+
+There is not a relationship between city population and amount of single transaction.
+
+Now I will focus on 7 main candidates as mentioned in univariate section. I will have a look at the total amount of contribution each candidate received. 
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+can_list3 <- fc_v7 %>% 
+  filter(cand_nm%in%main_candidates) %>% 
+  select(cand_nm, cand_pty_aff, 
+         contb_receipt_amt.individual, cand.n, total.amt) %>%
+  arrange(total.amt)
+
+total.amt_by_can <- unique(can_list3 %>% 
+                             ungroup() %>% 
+                             select(cand_nm,total.amt, cand.n)) %>%
+  arrange(total.amt)
+
+
+total.amt_by_can$cand_nm <-
+  ordered(total.amt_by_can$cand_nm,
+          levels=c("Trump, Donald J.", "Carson, Benjamin S.", "Bush, Jeb",
+                   "NORTH CA", 
+                   "Rubio, Marco", "Cruz, Rafael Edward 'Ted'",
+                   "Sanders, Bernard","Clinton, Hillary Rodham"))
+
+total.amt_by_can$cand_nm
+
+univ_disc2(total.amt_by_can, "cand_nm", "total.amt",
+           fill_feature = "cand.n")
+```
+
+Among the main candidates, Hillary collected the largest total amount of financial contribution, followed by Sanders, Bernard, Ted Cruz and Marco Rubio. The transaction number of Bernie Sanders are much higher than Hillary Cliton, at the same time the total amout he received is way less than Hillary Clinton. Why did this happen? Is it because the mean amount for single transcation for Bernie Sanders is way less than the mean amount for Hillary Clinton? Also, it is odd that Donald Trump received so little financial support from california whereas he hold possibly highest support rate in America. He might obtained much contribution from other area or he could have used his own money. It is out of this article's reach. Main candidates' single transaction amount is plotted in boxplot below.
+
+```{r echo=FALSE, warning=FALSE}
+fc_v8 <- fc_v7[fc_v7$cand_nm%in%main_candidates,]
+
+ggplot(aes(x=cand_nm, y=contb_receipt_amt.individual), 
+       data = fc_v8) +
+  geom_point(color = 'blue', alpha=1/20, size=0.3, 
+             position = position_jitter(h=0), 
+             stat='identity') +
+  scale_y_continuous(trans='log', breaks = seq(10, 50, 2800)) +
+  geom_boxplot(alpha= 0.3, color = 'red') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. How did the feature(s) of interest vary with other features in the dataset?
+The political geography of california is much liberal rather than conservative, people give more mone money to democratic party than republic party. The region of a contributor accounts for little difference in single trnasaction amout, and people from silicon valley and central california did donate slightly more than people from other regions.
+
+### Did you observe any interesting relationships between the other features (not the main feature(s) of interest)?
+To have a closer look at the political geograph, the support ratio for democratics and republic of different county or region is a concern in later analysis. The second concern is the percentage of total amount each party receiceved from out of the total amount of a county or a region. 
+
+### What was the strongest relationship you found?
+* Hillary Cliton obtained total amount as twice as Bernie Sanders although her transaction number is much less than bernie's.
+* Donald Trump received very little money from California. 
+* There is no obvious monotonic relaship between the population of region and the participation of a region, nor between the population and the single transaction amount from that region. 
+
+
+# Multivariate Plots Section
+```{r define multiv function}
+multiv_box <- function(data, feature, feature2,
+                       scale_y_log10=TRUE,
+                       fill_feature=NA,
+                       color_feature=NA,
+                       box_alpha=1,
+                       box_width=1,
+                       theme_std=TRUE){
+  if ((is.na(fill_feature))&(is.na(color_feature))){
+    p1 <-ggplot(aes_string(x=feature, y=feature2), data = data) +
+      geom_boxplot(alpha=box_alpha, width=box_width)
+  } else if ((is.na(fill_feature))&(!is.na(color_feature))){
+    p1 <-ggplot(aes_string(x=feature, y=feature2), data = data) +
+      geom_boxplot(aes_string(color=color_feature),
+                     alpha=box_alpha, width=box_width)
+  }else if ((!is.na(fill_feature))&(is.na(color_feature))){
+    p1 <-ggplot(aes_string(x=feature, y=feature2), data = data) +
+      geom_boxplot(aes_string(fill=fill_feature),
+                     alpha=box_alpha, width=box_width)
+  }else {
+    p1 <-ggplot(aes_string(x=feature, y=feature2), data = data) +
+      geom_boxplot(aes_string(fill=fill_feature,
+                              color=color_feature),
+                     alpha=box_alpha, width=box_width)
+  }
+  
+  if (scale_y_log10){
+    p1 <- p1 + scale_y_log10()
+  }
+  if (theme_std){
+    p1 <- p1 + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  }
+  p1
+}
+```
+
+This is the boxplot of single transaction amount of individual candidates from different party. 
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+fc_v7.plot0 <-fc_v7 
+unique(fc_v7.plot0$cand_pty_aff)
+fc_v7.plot0$cand_pty_aff <- ordered(fc_v7.plot0$cand_pty_aff,
+                                   levels=c("Republican Party",
+                                            "Democratic Party",
+                                            "Green Party",
+                                            "Libertarian Party"))
+```
+
+```{r echo=FALSE, warning=FALSE, fig.width=8.5, fig.height=6}
+# boxplot of individual transaction amount of each candidates by different party
+multiv_box(fc_v7.plot0, "cand_nm", "contb_receipt_amt.individual",
+           scale_y_log10 = FALSE,
+           theme_std = FALSE) +
+  facet_wrap(~cand_pty_aff, ncol=4, scales = 'free')+
+  theme(axis.text.x=element_text(angle=45, hjust = 1, size = 6))
+```
+
+Now have a closer look the single transaction amount by focusing on main candidates and contributors' regions. 
+
+```{r echo=FALSE, warning=FALSE, fig.width=8.5, fig.height=6,  Multivariate_Plots}
+multiv_box(subset(fc_v8, !is.na(contbr_region)), "cand_nm",
+           "contb_receipt_amt.individual",
+           fill_feature = "contbr_region",
+           box_alpha = 1/5)
+```
+
+It is obvious that the region where a contributor from affects little in the single transaction amount. 
+
+```{r results='hide'}
+fc.amt_by_contbr <- fc_v7 %>% group_by(cand_nm, contbr_nm, county,
+                                     contbr_region, cand_pty_aff)%>%
+  summarise(contbr.amt = sum(contb_receipt_amt.individual),
+            contbr.mean = mean(contb_receipt_amt.individual),
+            contbr.median = median(contb_receipt_amt.individual),
+            contbr.n = n()) %>% ungroup() 
+
+fc.amt_by_contbr$contbr.n.bucket <- cut(fc.amt_by_contbr$contbr.n, 
+                                      breaks = c(0, 1, 2, 6, 218))
+fc.amt_by_contbr$contbr.amt.bucket <- cut(fc.amt_by_contbr$contbr.amt, 
+                                      breaks = c(0, 132, 291, 800,
+                                                 35100))
+fc.amt_by_contbr$contbr.mean.bucket <- cut(fc.amt_by_contbr$contbr.mean,
+                                       breaks = c(0, 35, 87.5, 250,
+                                                  10800))
+```
+
+```{r results='hide', fig.width=7, fig.height=7}
+data <- fc.amt_by_contbr[fc.amt_by_contbr$cand_nm%in%
+                                 main_candidates, ]
+
+multiv_box(data, "cand_nm", "contbr.amt",
+           color_feature = "cand_nm",
+           box_width = 1.2, box_alpha = .3) +
+  geom_point(alpha=1/100, size=1/5, position = position_jitter(h=0)) +
+  stat_summary(fun.y=median, geom='point', pch=2, color='red', 
+               size=2)
+```
+
+```{r results='hide'}
+# drop levels
+data$cand_nm <- factor(data$cand_nm)
+
+by(data$contbr.amt, data$cand_nm, summary)
+```
+
+The median of all contribuots' personal donation amount is 278 dollars. The median of Personal total donation amount from supportors of Jeb BUsh, Hillary Clinton and Marco Rubio is larger than 278, whereas supportors for other main candidates tend to give less than median of all contributors' personal total donation amount. Now I will have a look at whether the ersiding region of contrbutors affect the individual total contribution amount. 
+
+```{r echo=FALSE, warning=FALSE, fig.width=8.5, fig.height=6}
+data <- subset(fc.amt_by_contbr[fc.amt_by_contbr$cand_nm%in%
+                                 main_candidates, ], 
+       !is.na(contbr_region))
+
+multiv_box(data, "cand_nm", "contbr.amt",
+           fill_feature = "contbr_region",
+           color_feature = "contbr_region",
+           box_alpha = 1/5) +
+  coord_cartesian(ylim = c(10, 5200))
+```
+
+The effection of residing region is slightly. 
+
+```{r echo=FALSE, warning=FALSE, fig.width=7, fig.height=7}
+data <- fc.amt_by_contbr[fc.amt_by_contbr$cand_nm%in%
+                                 main_candidates, ]
+
+multiv_box(data, "cand_nm", "contbr.n",
+           color_feature = "cand_nm",
+           box_width = 1.2, box_alpha = .3) +
+  geom_point(alpha=1/20, size=1/5, position = position_jitter(h=0)) +
+  stat_summary(fun.y=median, geom='point', pch=2, color='red', 
+               size=2)
+```
+
+Burnie Sander's supportors tends to contribute repeatly than other candidates' supportotrs. Most supportors of Jeb Bush, Donald Trump and Marco Rubio would like to contribute only once. 
+
+```{r echo=FALSE, warning=FALSE, fig.width=8, fig.height=7}
+ggplot(aes(x=cand_pty_aff, y=contbr.amt), 
+      data=subset(fc.amt_by_contbr, !is.na(contbr_region))) +
+  geom_point(alpha=1/20, position = position_jitter(h=0),
+             size=.3) + 
+  geom_boxplot(aes(color=cand_pty_aff), alpha=.3) + 
+  scale_y_log10() + 
+  facet_wrap(~contbr_region, scales='free') +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1, size=6))
+```
+
+People from silicon valley, west california, south california contributed more than people from central california, and jefferson. 
+Also, have a look at behavior of two main party's supportors focusing on the relatonship between how many times one denote and the total amount of money people donate.
+
+```{r echo=FALSE, warning=FALSE, fig.width=8, fig.height=6}
+fc.amt_by_contbr.two <- subset(fc.amt_by_contbr,
+                               cand_pty_aff=="Republican Party" |
+                                 cand_pty_aff=="Democratic Party") 
+
+ggplot(aes(x=contbr.amt, y=contbr.n), 
+      data=subset(fc.amt_by_contbr.two, !is.na(contbr_region))) +
+  geom_point(aes(color=cand_pty_aff),alpha=1/20, size=0.5,
+             position = position_jitter(h=0)) + 
+  facet_wrap(~contbr_region, scales = 'free') +
+  scale_x_continuous(trans='log', breaks = c(1,10,20,150,1000,2700)) +
+  scale_y_continuous(trans='log', breaks = c(1,2,5,10, 15, 20)) + 
+  coord_cartesian(xlim = c(10, 2700)) +
+  coord_cartesian(ylim=c(1, 20)) + 
+  geom_smooth(formula = log(x)~log(y)) +
+  geom_smooth(aes(color=cand_pty_aff)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        legend.key.size = unit(.5, "lines")) 
+```
+
+Supportors for republican party denotes less times, and they donate more total money with the same times of transaction. 
+Also, inspect the relationship between mean amount and the number of transactions for one in the two main party.
+
+```{r echo=FALSE, warning=FALSE, fig.width=8, fig.height=6}
+ggplot(aes(x=contbr.mean, y=contbr.n), 
+      data=subset(fc.amt_by_contbr.two, !is.na(contbr_region))) +
+  geom_point(aes(color=cand_pty_aff),alpha=1/5, size=0.3,
+             position = position_jitter(h=0)) + 
+  facet_wrap(~contbr_region, scales = 'free') +
+  scale_x_continuous(trans='log10', breaks = c(1,10,20,150,1000,2700)) +
+  scale_y_continuous(trans ='log10', breaks = c(1,2,5,10, 15, 20)) + 
+  coord_cartesian(xlim = c(1, 2700)) +
+  coord_cartesian(ylim=c(1, 20)) +
+  geom_smooth() +
+  geom_smooth(aes(color=cand_pty_aff)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1),
+        legend.key.size = unit(.5, "lines"))
+```
+
+It is true for both party's supportors that the more time one donate, the smaller amount one donate each time. The behavior difference between different party supportors and residential region is very small, and almost negligible. 
+
+It is known from previous sections that the transaction number for Bernie Sanders is more than twice the transaction number of Hillary Clinton's. However, the total received financial amount of Hillary Clinton is much more than total received amount of Bernie Sanders. Now I will have a closer look at the behaviors of supportors of these two candidates. 
+
+```{r results='hide'}
+HB_candidates <- c("Clinton, Hillary Rodham", "Sanders, Bernard")
+fc.amt_by_contbr.HB <- fc.amt_by_contbr[fc.amt_by_contbr$cand_nm%in%
+                                 HB_candidates, ]
+fc.amt_by_contbr.HB$cand_nm <- factor(fc.amt_by_contbr.HB$cand_nm)
+
+ggplot(aes(x = 50*round(contbr.amt/50), y = contbr.n), 
+       data = fc.amt_by_contbr.HB) +
+  geom_line(aes(color=cand_nm), stat = 'summary', fun.y=mean) +
+  geom_smooth(aes(color=cand_nm)) + 
+  scale_x_continuous(trans='log', breaks = c(1,10,20,150,1000,2700)) +
+  scale_y_continuous(trans='log', breaks = c(1,2,5,10, 15, 20)) 
+```
+
+```{r}
+ggplot(aes(x = 50*round(contbr.amt/50), y = contbr.mean), 
+       data = fc.amt_by_contbr.HB) +
+  geom_line(aes(color=cand_nm), stat = 'summary', fun.y=mean) +
+  geom_smooth(aes(color=cand_nm)) + 
+  scale_x_continuous(trans='log', breaks = c(1,10,20,150,1000,2700)) +
+  scale_y_continuous(trans='log', breaks = c(1,10,20,150,1000,2700)) 
+```
+
+It is obvious that when supportors of Bernie Sanders and supportors of Hillary Clinton gave the same total personal contribution, Bernie's supportors have much higher dnation frequency and much lower mean single transaction amount. 
+
+Draw a county polygon by the proportion of number of party supportors out of the total amount people who gave a contribution. 
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+county.map_data <- map_data(mapCounty)
+str(county.map_data)
+county.map_data$subregion <- toupper(county.map_data$subregion)
+
+fc.amt_by_contbr2 <- fc.amt_by_contbr %>% 
+  subset(county!="") %>% 
+  ungroup() %>% group_by(county, cand_pty_aff) %>% 
+  summarise(party_supportors.county=n(),
+            party_sum.county=sum(contbr.amt)) %>% 
+  ungroup()
+
+county.people <- fc.amt_by_contbr2 %>% group_by(county) %>% 
+  summarise(county.people=sum(party_supportors.county))
+
+fc.amt_by_contbr.dem <- fc.amt_by_contbr2[ ,1:3] %>% 
+  filter(cand_pty_aff=="Democratic Party") %>% 
+  select(-cand_pty_aff)
+
+county.people.dem <- left_join(county.people, fc.amt_by_contbr.dem, 
+                               by="county") %>% 
+  mutate(people_prop=party_supportors.county/county.people*100) %>% 
+  mutate(people_prop.bucket=cut(people_prop, breaks=6))
+
+county.people.dem.map <- merge(county.map_data, county.people.dem %>%
+                                 select(county,
+                                      people_prop),by.x=c("subregion"),
+                               by.y = c("county"))
+
+ggplot(data = county.people.dem.map, aes(x=long, y=lat, group=group)) +
+  geom_polygon(aes(fill=cut_number(people_prop, 6)))+
+  geom_path(color='gray', linetype=2) +
+  coord_map() +
+  scale_fill_brewer("people_prop", palette = 'PuBu')+
+  theme_bw()+
+  ggtitle("THE PROPORTION OF CONTRIBUTORS TO DEMOCRATIC PARTY")
+```
+
+```{r echo=FALSE, warning=FALSE}
+fc.amt_by_contbr.gop <- fc.amt_by_contbr2[ ,1:3] %>% 
+  filter(cand_pty_aff=="Republican Party") %>% 
+  select(-cand_pty_aff)
+
+county.people.gop <- left_join(county.people, fc.amt_by_contbr.gop, 
+                               by="county") %>% 
+  mutate(people_prop=party_supportors.county/county.people*100)
+
+county.people.gop.map <- merge(county.map_data, county.people.gop %>%
+                                 select(county,
+                                      people_prop),by.x=c("subregion"),
+                               by.y = c("county"))
+
+ggplot(data = county.people.gop.map, aes(x=long, y=lat, group=group)) +
+  geom_polygon(aes(fill=cut_number(people_prop, 6)))+
+  geom_path(color='gray', linetype=2) +
+  coord_map() +
+  scale_fill_brewer("people_prop", palette = 'PuRd')+
+  theme_bw()+
+  ggtitle("THE PROPORTION OF CONTRIBUTORS TO REPUBLICAN PARTY")
+```
+
+I would also like to look the proportion of contribution by the amount of money people contributed to the main two parties. 
+
+```{r echo=FALSE, warning=FALSE}
+county.money <- fc.amt_by_contbr2 %>% group_by(county) %>% 
+  summarise(county.money=sum(party_sum.county))
+
+fc.amt_by_contbr.dem2 <- fc.amt_by_contbr2[ ,c(1,2,4)] %>% 
+  filter(cand_pty_aff=="Democratic Party") %>% 
+  select(-cand_pty_aff)
+
+county.money.dem <- left_join(county.money, fc.amt_by_contbr.dem2, 
+                               by="county") %>% 
+  mutate(money_prop=party_sum.county/county.money*100)
+
+county.money.dem.map <- merge(county.map_data, county.money.dem %>%
+                                 select(county,
+                                      money_prop),by.x=c("subregion"),
+                               by.y = c("county"))
+
+ggplot(data = county.money.dem.map, aes(x=long, y=lat, group=group)) +
+  geom_polygon(aes(fill=cut_number(money_prop, 6)))+
+  geom_path(color='gray', linetype=2) +
+  coord_map() +
+  scale_fill_brewer("money_prop", palette = 'PuBu')+
+  theme_bw()+
+  ggtitle("THE PROPORTION OF COUNTY INCOME GOES TO DEMOCRATIC PARTY")
+```
+
+```{r echo=FALSE, warning=FALSE}
+fc.amt_by_contbr.gop2 <- fc.amt_by_contbr2[ ,c(1,2,4)] %>% 
+  filter(cand_pty_aff=="Republican Party") %>% 
+  select(-cand_pty_aff)
+
+county.money.gop <- left_join(county.money, fc.amt_by_contbr.gop2, 
+                               by="county") %>% 
+  mutate(money_prop=party_sum.county/county.money*100)
+
+county.money.gop.map <- merge(county.map_data, county.money.gop %>%
+                                 select(county,
+                                      money_prop),by.x=c("subregion"),
+                               by.y = c("county"))
+
+ggplot(data = county.money.gop.map, aes(x=long, y=lat, group=group)) +
+  geom_polygon(aes(fill=cut_number(money_prop, 6)))+
+  geom_path(color='gray', linetype=2) +
+  coord_map() +
+  scale_fill_brewer("money_prop", palette = 'PuRd')+
+  theme_bw()+
+  ggtitle("THE PROPORTION OF COUNTY INCOME GOES TO REPUBLICAN PARTY")
+```
+
+Now we get an great political geographic pictures Here. California is over all lean to left-wing and liberal. There is still less than half people goes for republican. People from silicon valley, western california is much liberal, whereas people from south california, jefferson are more conservative.  
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. Were there features that strengthened each other in terms of looking at your feature(s) of interest?
+
+Among the main candidates, lasrgest single transaction amount is 10800, goes for Ted, Cruz. Second largest single transaction amount is 10000, goes for Bernie Sanders, Jeb Bush, Ben Carson. 2700 is the smallest max single transaction amount, goes for Donald Trump. Take median single transaction amount as an indicator, the songle transaction amount ranked from the lowest to the highest liek below (use median as indicator): 
+Bernie Sanders < Ben Carson = Hillary Clinton = Ted Cruz < Marco Rubio < Donald Trump < Jeb Bush
+
+People support Bernie Sanders would contribute much more times than supportors for any other candidates. The prequency of denoation from different candidates' supportors is ranked from the highest to the lowest as below (use median as indicator):
+Bernie Snders > Ted Cruz > Ben Carson = Hillary Clinton > Jeb Bush = Marco Rubio = Donald Trump
+
+The accumulative amount one individual contributor would gave of different candidates ranked from highest to lowest as below(use median as indicator):
+Jeb Bush > Hillary Clinton=Marco Rubio > Ben Carson = Ted Cruz = Donald Trump > Bernie Sanders
+
+At last, among the main candidates, Hillary Clinton has the largest total received amount, followed by Bernie Sanders. Then Ted Cruz and Marco Rubio tied on the third place of total received financial contribution. Bernie Sanders has the largest transaction number and Hillary Clinton has the second largest transaction number. 
+
+People contribute to democratic candidates a total amount of 51595715.4 dollars, among whihc Hillary obtained 65.94% of the total amount and Bernie Sanders obtained 32.96%. People contributed 26268578.7 for republican party. People in California gave almost as twice amount (1.964) of money to democratic party as to repubican party. And Hillary's received amount alone is more than the total received amount of the main 5 republic candidates: Donald Trump, Ben Carson, Jeb Bush, Marco Rubio and Ted Cruz. 
+
+In this anaysis, Califronis is devided to 6 regions, people from Silicon Valley, West California gave more total amount money, whereas people from Central California and Jefferson gave less total amount of money. People from Silicon Valley and West Califronia are much more keen to democratic party, whereas people from Central California, South Califronia are less keen to democratic party. 
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+by(fc_v7$contb_receipt_amt.individual, fc_v7$cand_nm, summary)
+```
+
+```{r echo=FALSE, warning=FALSE}
+single_amt_median <- fc_v7 %>% group_by(cand_nm) %>%
+  summarise(
+    single_trnasaction_median=median(contb_receipt_amt.individual)) %>%
+  arrange(single_trnasaction_median) %>%
+  filter(cand_nm%in%main_candidates)
+
+fc.amt_by_contbr.main <- subset(fc.amt_by_contbr,
+                                cand_nm%in%main_candidates)
+cont.n.median.main <- fc.amt_by_contbr.main %>% 
+  group_by(cand_nm) %>% 
+  summarise(cont.n.median= median(contbr.n))
+
+cont.amt.median.main <- fc.amt_by_contbr.main %>% 
+  group_by(cand_nm) %>% 
+  summarise(cont.amt.median= median(contbr.amt), 
+            cont.amt.max =  max(contbr.amt))
+
+party.amt <- fc_v7 %>% group_by(cand_pty_aff) %>%
+  summarise(party.amt=sum(contb_receipt_amt.individual))
+
+cand.amt.main <- unique(fc_v8 %>% 
+                          select(cand_nm, total.amt) %>%
+                          group_by(cand_nm)) %>%
+  ungroup() %>% arrange(total.amt)
+```
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+by(fc.amt_by_contbr$contbr.amt, fc.amt_by_contbr$cand_pty_aff, summary)
+```
+
+```{r warning=FALSE, echo=FALSE, results='hide'}
+# Hillary's total amount is larger the total amount of 5 main republic
+# candidates
+cand.amt.main[7, ]$total.amt > sum(cand.amt.main[1:5, ]$total.amt)
+```
+
+
+### Were there any interesting or surprising interactions between features?
+At frist, I thought people supports Bernie Sanders gave little in every single transaction, then Bernie Sander would not have collected so much money. But it turned to be that he collected the second largest amount of money from Caifornia. One reason is that so many people support him, and another reason is that his supports tend to contribute many time. At 50% of his supportors contrbuted equal or greater than 4 times. There is one named MCLENNAN, MARLYN donated 218 times varied from 1 dollars to 100 dollars, the mean of his single donation is 7.32 dollars. He donated a total amount of 1595.68. It is also surprised that Bernie has the larger accumulate individual amount than Hillary Clinton. Bernie has a 21750 from one person at most, whereas Hillary only has a 10800 from one person at most. 
+
+```{r echo=FALSE, warning=FALSE}
+sorted.cont.n <- fc.amt_by_contbr %>% arrange(desc(contbr.n))
+
+MCLENNAN_MARLYN <- fc_v7[fc_v7$contbr_nm=='MCLENNAN, MARLYN', ] %>%
+  select(contbr_city, contbr_employer, county, cand_nm,
+         contbr_occupation, contb_receipt_amt.individual, contbr_zip)
+```
+
+```{r warning=FALSE, echo=FALSE, results='hide'}
+#summary of MCLENNAN_MARLYN
+summary(MCLENNAN_MARLYN$contb_receipt_amt.individual)
+```
+
+```{r warning=FALSE, echo=FALSE, results='hide'}
+# total amount from MCLENNAN_MARLYN
+sum(MCLENNAN_MARLYN$contb_receipt_amt.individual)
+```
+------
+
+# Final Plots and Summary
+
+### Plot One
+```{r echo=FALSE, warning=FALSE, results='hide'}
+fc.amt_by_contbr$contbr.n.bucket <- cut(fc.amt_by_contbr$contbr.n, 
+                                      breaks = c(0, 1, 2, 6, 218))
+fc.amt_by_contbr$contbr.amt.bucket <- cut(fc.amt_by_contbr$contbr.amt, 
+                                      breaks = c(0, 132, 291, 800,
+                                                 35100))
+
+fc.amt_by_contbr.plot1 <- subset(fc.amt_by_contbr,
+                                 cand_pty_aff=="Republican Party" |
+                                   cand_pty_aff=='Democratic Party') %>%
+  subset(!is.na(contbr_region))
+
+summary(fc.amt_by_contbr.plot1$contbr.amt)
+summary(fc.amt_by_contbr.plot1$contbr.n)
+
+# order the contbr_region factor by descending contribution amount
+fc.amt_by_contbr.plot1$contbr_region <-
+  ordered(fc.amt_by_contbr.plot1$contbr_region,
+          levels=c("WEST CA","SILICON VALLEY",
+                   "SOUTH CA","NORTH CA","CENTRAL CA",
+                   "JEFFERSON"))
+```
+
+```{r echo=FALSE, warning=FALSE, fig.width=7, fig.height=6, Plot_One}
+ggplot(aes(x=contbr.amt), 
+       data = fc.amt_by_contbr.plot1) +
+  geom_histogram(aes(fill=contbr.amt.bucket), binwidth = .15) +
+  facet_grid(cand_pty_aff ~ contbr_region, scales = 'free') +
+  scale_x_log10() +
+  ggtitle("Distribution of Personal Contribution Amount") +
+  xlab("Personal Contribution Amount ($)") +
+  ylab("Frequency (count)") + 
+  scale_fill_brewer(type='seq',
+                    palette = 'Blues',
+                    guide = guide_legend(
+                      title = 'Personal Contribution Amount',
+                      override.aes = list(alpha = 1, size = 2))) +
+  theme(strip.text.x=element_text(size=8, angle=45),
+        strip.text.y=element_text(size=10, face='bold'),
+        strip.background=element_rect(color = 'red',fill = '#CCCCFF'),
+        panel.background=element_rect(fill = '#bdbdbd'),
+        legend.key.size=unit(.5, "lines"),
+        legend.position="bottom")
+```
+
+### Description One
+```{r echo=FALSE, warning=FALSE, results='hide'}
+by(fc.amt_by_contbr.plot1$contbr.amt,
+   fc.amt_by_contbr.plot1$contbr_region, summary)
+
+summary(fc.amt_by_contbr.plot1$contbr.amt)
+
+## total amount to two main parties
+sum(fc.amt_by_contbr.plot1$contbr.amt)
+
+## to republican 
+sum(fc.amt_by_contbr.plot1[
+  fc.amt_by_contbr.plot1$cand_pty_aff=='Republican Party', ]$contbr.amt)/
+  sum(fc.amt_by_contbr.plot1$contbr.amt)
+
+## to democratic party 
+sum(fc.amt_by_contbr.plot1[
+  fc.amt_by_contbr.plot1$cand_pty_aff=='Democratic Party', ]$contbr.amt)/
+  sum(fc.amt_by_contbr.plot1$contbr.amt)
+```
+
+Over 6 regions in california, 77809347 dollars are donated to two main political parties: republican and democratic parties. And 66.3% is for democratic party whereas 33.7% goes for democratic party. California's political geograph is more left-wing rather than right-wing. The approval ratio of democratic over that of republican is higher in silicon valley and west california, whereas the result is much lower in other areas, especially in south california. 
+
+### Plot Two
+```{r echo=FALSE, warning=FALSE, results='hide'}
+fc.amt_by_contbr.plot2 <- fc.amt_by_contbr %>%
+  subset(cand_nm%in%main_candidates)
+
+## add a variable personal mean donation in single trnasaction
+fc.amt_by_contbr.plot2$mean_contbr_single_amt <-
+  fc.amt_by_contbr.plot2$contbr.amt/fc.amt_by_contbr.plot2$contbr.n
+
+summary(fc.amt_by_contbr.plot2$mean_contbr_single_amt)
+summary(fc.amt_by_contbr.plot2$contbr.amt)
+fc.amt_by_contbr.plot2$mean_contbr_single_amt.bucket <-
+  cut(fc.amt_by_contbr.plot2$mean_contbr_single_amt, 
+      breaks=c(0, 33.33,78.99,250,10800))
+```
+
+```{r fig.width=8, fig.height=5, Plot_Two}
+ggplot(aes(y=contbr.n, x=contbr.amt),
+       data = fc.amt_by_contbr.plot2) +
+  geom_point(position = position_jitter(h=0), alpha=1/20, size=0.3,
+             color='#515151')+
+  scale_x_continuous(trans='log10', limits = c(10, 4700), 
+                     breaks = c(10, 20, 100, 1000, 5000)) +
+  scale_y_continuous(trans='log10',
+                     limits = c(1, 39), breaks = c(1, 2, 20, 40)) + 
+  geom_smooth(aes(color=cand_nm), se=FALSE, 
+              formula = log(y)~log(x)) +
+  ggtitle(
+    "Personal contribution amount vs. Personal contribution times")+
+  ylab("Personal Contribution Frequency (count)") +
+  xlab("Personal Contribution Amount ($)") +
+  facet_wrap(~cand_pty_aff, scales='free', ncol=2) +
+  scale_color_brewer(palette = 'Accent',
+                    guide = guide_legend(
+                      title = 'candidate name',
+                      override.aes = list(alpha = 1, size = 2))) +
+  theme(strip.text.x=element_text(size=8, face = 'bold'),
+        strip.background=element_rect(color = 'red',fill = '#CCCCFF'),
+        panel.background=element_rect(fill = '#969696'),
+        legend.key.size=unit(.5, "lines"))
+```
+
+### Description Two
+```{r echo=FALSE, warning=FALSE, results='hide'}
+# drop levels 
+fc.amt_by_contbr.plot2$cand_nm <-
+  factor(fc.amt_by_contbr.plot2$cand_nm)
+
+by(fc.amt_by_contbr.plot2$contbr.amt, 
+   fc.amt_by_contbr.plot2$cand_nm, summary)
+
+summary(fc.amt_by_contbr.plot2$contbr.amt)
+
+fc.amt_by_contbr.plot2 %>% group_by(cand_nm) %>%
+  summarise(contbr_max=max(contbr.amt), 
+            contbr_median=median(contbr.amt)) %>% 
+  arrange(contbr_median)
+
+by(fc.amt_by_contbr.plot2$mean_contbr_single_amt,
+   fc.amt_by_contbr.plot2$cand_nm, summary) 
+
+fc.amt_by_contbr.plot2 %>% group_by(cand_nm) %>% 
+  summarise(median_of_mean=median(mean_contbr_single_amt)) %>% 
+  arrange(median_of_mean)
+fc.amt_by_contbr.plot2 %>% group_by(cand_nm) %>% 
+  summarise(contbr_num_max=max(contbr.n),
+            contbr_num_median=median(contbr.n)) %>%
+  arrange(contbr_num_median)
+```
+Among the main candidates, 1st quantile of personal contribution amount is 127, median is 278 and 3rd quantile is 750. The largest personal contribution is 35100, goes to Ted Cruz and smallest personal contribution goes to Donal Trump, which is 8100. Bernie Sander's supportors trnd to contribute repeatedly much more than other candidate's supportors. The average transaction amount of an individual contributor supporting different different candidates is ranked from lowest to the highest as below(median as indicator):
+Bernie Sanders < Ted Cruz < Ben Carson < Hillary Clinton < Donald Trump < Marco Rubio < Jeb Bush. 
+
+It is obvious that Bernie sanders' supportors tends to contribute most times but least amount in single transaction. 
+Ted Cruz's supportors tends to contribute second most times, the median contrition times is 3 and to contribute second least amount in single trnasaction, the median amount of single transaction is 75. 
+Hillary Clinton and Ben Carson's supportors tends to contribute 2 times and Clinton's suppotors gives much more than Ben Carson's supportors in a single transaction. The median of average single transaction of a Hillary Clinton's supportor is 230, whereas Ben Carson's supportor gave only 85 dollars every time he contributes. 
+Supportors for Donald Trump, Marco Rubio and Jeb Bush would like to contribute once most of the time, but each time they give a relative high amount, especially supportors of Jeb Bush. The median of Jeb Bush supports' individual mean single transaction amount is 2700 dollars, which is the highest among the 7 main candidates.
+
+### Plot Three
+```{r echo=FALSE, warning=FALSE, results='hide'}
+# supportor's number ratio of republican divided by democratic
+people.dem <- county.people.dem %>% select(county, people_prop)
+names(people.dem)[2] <- "people_prop.dem"
+names(people.dem)
+
+people.gop <- county.people.gop %>% select(county, people_prop)
+names(people.gop)[2] <- "people_prop.gop"
+names(people.gop)
+
+people.ratio <- merge(people.dem, people.gop, by="county") %>%
+  mutate(people_prop_ratio=people_prop.dem/people_prop.gop)
+
+summary(people.ratio$people_prop_ratio)
+
+people.ratio.map <- merge(county.map_data, people.ratio %>%
+                                 select(county,
+                                      people_prop_ratio),
+                          by.x=c("subregion"),
+                          by.y = c("county"))
+```
+
+```{r trail one, results='hide'}
+table(cut_number(people.ratio.map$people_prop_ratio, 12))
+
+#display.brewer.pal(8, "Blues")
+people.palette2 <- brewer.pal(8, "Blues")
+
+#display.brewer.pal(3, "Reds")
+people.palette1 <- rev(brewer.pal(3, "Reds"))
+
+people.palette <- union(union(people.palette1,
+                              c("#B5B3B4")),people.palette2)  
+
+legend_labels.people <- c("Pro-REP level 3", "Pro-REP level 2", 
+                          "Pro-REP level 1", "Neutral", 
+                          "Pro-DEM level 1", "Pro-DEM level 2", 
+                          "Pro-DEM level 3", "Pro-DEM level 4", 
+                          "Pro-DEM level 5", "Pro-DEM level 6",
+                          "Pro-DEM level 7", "Pro-DEM level 8")
+```
+
+```{r echo=FALSE, warning=FALSE}
+p1 <- ggplot(data = people.ratio.map, aes(x=long, y=lat, 
+                                          group=group)) +
+  geom_polygon(aes(fill=cut_number(people_prop_ratio, 12)))+
+  geom_path(color='gray', linetype=2) +
+  coord_map() +
+  scale_fill_manual("Political Preference",
+                  values=people.palette,
+                  labels=legend_labels.people) +
+  theme_bw()+
+  ggtitle("Democratic Supportors' Proportion 
+          over Republican Supportors' Proportion") +
+  theme(text=element_text(size=8),
+    panel.background=element_rect(fill='#696969'),
+    legend.key.size=unit(.4, "lines"),
+    legend.position=c(.9, .9)) 
+```
+
+```{r echo=FALSE, warning=FALSE, results='hide'}
+# supportor's number ratio of republican divided by democratic
+money.dem <- county.money.dem %>% select(county, money_prop)
+names(money.dem)[2] <- "money_prop.dem"
+names(money.dem)
+
+money.gop <- county.money.gop %>% select(county, money_prop)
+names(money.gop)[2] <- "money_prop.gop"
+names(money.gop)
+
+money.ratio <- merge(money.dem, money.gop, by="county") %>%
+  mutate(money_prop_ratio=money_prop.dem/money_prop.gop)
+
+summary(money.ratio$money_prop_ratio)
+
+money.ratio.map <- merge(county.map_data, money.ratio %>%
+                                 select(county,
+                                      money_prop_ratio),
+                         by.x=c("subregion"),
+                         by.y = c("county"))
+```
+
+```{r results='hide'}
+table(cut_number(money.ratio.map$money_prop_ratio, 12))
+
+#display.brewer.pal(7, "Blues")
+money.palette2 <- brewer.pal(7, "Blues")
+
+#display.brewer.pal(4, "Reds")
+money.palette1 <- rev(brewer.pal(4, "Reds"))
+
+money.palette <- union(union(money.palette1,
+                              c("#B5B3B4")),money.palette2)  
+
+legend_labels.money <- c("Pro-REP level 4", "Pro-REP level 3", 
+                          "Pro-REP level 2", "Pro-REP level 1",
+                          "Neutral", 
+                          "Pro-DEM level 1", "Pro-DEM level 2", 
+                          "Pro-DEM level 3", "Pro-DEM level 4", 
+                          "Pro-DEM level 5", "Pro-DEM level 6",
+                          "Pro-DEM level 7")
+```
+
+```{r echo=FALSE, warning=FALSE}
+p2 <- ggplot(data = money.ratio.map, aes(x=long, y=lat, group=group)) +
+  geom_polygon(aes(fill=cut_number(money_prop_ratio, 12)))+
+  geom_path(color='gray', linetype=2) +
+  coord_map() +
+  scale_fill_manual("Political Preference",
+                    values=money.palette,
+                    labels=legend_labels.money) +
+  theme_bw()+
+  ggtitle("Democratic Received Amount Proportion over 
+          Republican Received Amount Proportion") +
+  theme(text=element_text(size=8),
+    panel.background=element_rect(fill='#696969'),
+    legend.key.size=unit(.4, "lines"),
+    legend.position=c(.9, .9))
+```
+
+Political Geography of California 
+
+```{r echo=FALSE, warning=FALSE, fig.width=9, fig.height=8, Plot_Three}
+grid.arrange(p1, p2, ncol=2)
+```
+
+### Description Three
+```{r echo=FALSE, warning=FALSE, results='hide'}
+people.ratio_by_region <- left_join(people.ratio, 
+                                    county.region[ ,1:2], 
+                                    by='county') %>% 
+  select(county, people_prop_ratio, contbr_region)
+
+people.ratio_by_region <- people.ratio_by_region %>%
+  group_by(contbr_region) %>% 
+  summarise(max_percent = max(people_prop_ratio), 
+            min_percent = min(people_prop_ratio),
+            mean_percent = mean(people_prop_ratio),
+            median_percent = median(people_prop_ratio))
+
+money.ratio_by_region <- left_join(money.ratio, 
+                                   county.region[ ,1:2], 
+                                   by='county') %>% 
+  select(county, money_prop_ratio, contbr_region)
+
+money.ratio_by_region <- money.ratio_by_region %>%
+  group_by(contbr_region) %>% 
+  summarise(max_percent = max(money_prop_ratio), 
+            min_percent = min(money_prop_ratio),
+            mean_percent = mean(money_prop_ratio),
+            median_percent = median(money_prop_ratio))
+
+# which region is most pro-democratic
+arrange(people.ratio_by_region, desc(median_percent))
+arrange(money.ratio_by_region, desc(median_percent))
+
+# which region is most pro-democratic county from
+# which region is most pro-republican county from
+arrange(people.ratio_by_region, desc(max_percent))
+arrange(people.ratio_by_region, min_percent)
+```
+The plot shows political preference by using two indicators. The left graph uses supportors' population as an indicator, whereas the right graph uses the amount of financial contribution each party received as an indicator. Blues denote pro-democratic and Reds denote pro-republican. The higher the level is, the higher the degree of preference is. Dark blue means much more prefer to democratic party than light blue, and dark red means much more prefer to republican party than light red. Regions without apparent prefernce or are relatively neutral are colored with gray or near white light blues/reds. 
+
+The most pro-democrtic region is silicon valley, and the second region is north california from both people and money perspectives. Jefferson and west califronia are still pro-democratic but with relatively less ratio over the republican party. The most pro-republican region is central california. South California is kind of in the middle with slight pro to democratic. 
+
+The most pro-democratic county comes from silicon valley, and the second most pro-democritc county comes from jefferson, which is not an overall second most pro-democratic region. 
+
+THe most pro-republican county comes from central california, which is also the most pro-republican region. The second most pro-republican county comes from jefferson, which is not a second most pro-republican region. 
+
+California is overall pro-democratic, which is obvious by  viewing the large area of blue on the politicla geography map. However, most counties from central california and a specific county from jefferson do prefer republican party with a noticeable ratio. 
+
+# Reflection
+The data set I focused on contains 542729 records of financial contributions across 24 variables. By univariate plot and analysis, I obtain an overview of the data set. By plotting histogram of single transaction amount, it is interpreted that the single transaction amount is highly skewed, that's why I make a log10 transimission in terms of the amount of money. After transmission, the single transaciton amount is nearly normal distributon. I understood that there are outliers in single trnasaction amount and also the transaction number, that's why in later analysis I mostly inspect data elements within 0.99 quantile range. In the bivariable analysis phase, I continuned to explore my ideas and intersts by inspecting relationships between both qualitative-quantitative pairs and quantitative-quantitative pairs. Through boxplot, I visulized import statistics like mean, medinan for categorical variables. In multivariable phase, I contnued to inspect the relationships oberved earlier by add more variables to see whether they were any lurking variables that would affect the relationship heavily. When I was trying to obtain an smooter line for the relationship between personal contribution amount and personal contribution times, it was diffidult to obtain an illustrative graph. It was because the geom_point plot was overplotting, by adjusting the x axis and taking a log10 transmission, I successed to obtain a more illustrative graph with estimated smoother lines. The issue of overplotting also affectted many other plots, I overcomed it by adding transparency, axis transimission and use different categorical colors.  
+
+There are some limitations in the data analysis. In this analysis, the latest contributor receipt date is April 30th int eh year 2016. This data might be incomplete and is not updated if there are more contibutions afer this latest time. Besides, the outcome maybe biased because I ignored all the refund transactions in this project. When I analyze the individual contributor, I use contbr_nm and contbr_zip as the unique contributor's locator. There might be people with same name and reside in the same district. More inspection with whether a name is shared by different people is recommended.
+
+I also come up with some future ideas and intersets. First of all, I would like to inveatigate contributors behavior's change along with time. Did the contribution amount and contribution frequency increase or decrese along with time as well as social public events happened around the time they made a donation. Secondly, I would like to inspect the relationship bertween people's contribution behavior and their own social-sconomic status. The social-econoic status should be defined and categorized by considering the combinaiton of their occupation, employer, income, residing region and other related variables. In this anaylysis, only contributors' region was inspected. More variables are suggested to be investigated later to understand people's behaviour. It is also suggested to scrape and collect other features such as people's income in the future. 
+
+Along with heat up of the presidential campaignship, unpredented incidents keep coming out. These incidetns would affect the financial contribution heavily and even drive the political geography dramatically. When interpreting the political geography in california of this article, it is important to understand that the political geography is not consistent all the time, it varies, fluctuates, and sometimes even reverses along with the election goes on. It is recommended to intrepret the outcome from this article with reference to more recently reviewed and updated information to make a more objective judgement and prediction. 
